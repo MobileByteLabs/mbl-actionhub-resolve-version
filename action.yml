@@ -22,6 +22,10 @@ inputs:
     description: 'Which part to bump: patch (default), minor, or major'
     required: false
     default: 'patch'
+  fallback-version:
+    description: 'Version to use when nothing is published on Maven Central yet (first publish). If empty, defaults to 0.0.1.'
+    required: false
+    default: ''
 
 outputs:
   version:
@@ -42,6 +46,7 @@ runs:
         ARTIFACT_ID="${{ inputs.artifact-id }}"
         PATTERN="${{ inputs.module-pattern }}"
         BUMP="${{ inputs.bump }}"
+        FALLBACK="${{ inputs.fallback-version }}"
 
         # Auto-detect from build.gradle.kts if not provided
         if [ -z "$GROUP_ID" ] || [ -z "$ARTIFACT_ID" ]; then
@@ -53,10 +58,20 @@ runs:
           for dir in ${PATTERN}*/; do
             [ ! -d "$dir" ] && continue
             [ ! -f "${dir}build.gradle.kts" ] && continue
+
+            # Try coordinates() first (vanniktech style)
             COORDS=$(grep 'coordinates(' "${dir}build.gradle.kts" || true)
             if [ -n "$COORDS" ]; then
               [ -z "$GROUP_ID" ] && GROUP_ID=$(echo "$COORDS" | grep -o '"[^"]*"' | head -1 | tr -d '"')
               [ -z "$ARTIFACT_ID" ] && ARTIFACT_ID=$(echo "$COORDS" | grep -o '"[^"]*"' | sed -n '2p' | tr -d '"')
+              break
+            fi
+
+            # Fallback: group = "..." (standard Gradle style)
+            GROUP_LINE=$(grep -m1 '^group\s*=' "${dir}build.gradle.kts" || true)
+            if [ -n "$GROUP_LINE" ]; then
+              [ -z "$GROUP_ID" ] && GROUP_ID=$(echo "$GROUP_LINE" | grep -o '"[^"]*"' | tr -d '"')
+              [ -z "$ARTIFACT_ID" ] && ARTIFACT_ID="${dir%/}"
               break
             fi
           done
@@ -78,6 +93,13 @@ runs:
         fi
 
         if [ -z "$LATEST" ]; then
+          if [ -n "$FALLBACK" ]; then
+            echo "::notice::No published version found on Maven Central — using fallback version ${FALLBACK}"
+            echo "current=" >> $GITHUB_OUTPUT
+            echo "version=${FALLBACK}" >> $GITHUB_OUTPUT
+            echo "Resolved: ${GROUP_ID}:${ARTIFACT_ID} not published yet → using fallback ${FALLBACK}"
+            exit 0
+          fi
           echo "::warning::No published version found on Maven Central — using 0.0.0 as base"
           LATEST="0.0.0"
         fi

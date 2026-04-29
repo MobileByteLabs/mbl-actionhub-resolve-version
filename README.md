@@ -27,7 +27,7 @@ Fetches the latest published version from Maven Central and bumps it. No version
     module-pattern: 'cmp-'
 ```
 
-Scans `cmp-*/build.gradle.kts` for `coordinates("group", "artifact")` and queries Maven Central.
+Scans `cmp-*/build.gradle.kts` for `coordinates("group", "artifact")` or `group = "..."` and queries Maven Central. When using `group = "..."` style, the module directory name is used as the artifact ID.
 
 ### Bump types
 
