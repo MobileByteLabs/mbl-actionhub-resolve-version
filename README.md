@@ -1,13 +1,17 @@
 # mbl-actionhub-resolve-version
 
-Fetches the latest published version from Maven Central and bumps it. No version to manage in your repo.
+Resolves the next publish version automatically. Zero code to manage.
+
+## How it works
+
+1. **Maven Central** — queries for the latest published version → bumps it
+2. **GitHub Releases** — if not yet on Maven Central, uses the latest GitHub Release tag
+3. **Error** — if neither exists, fails with a clear message to create a GitHub Release first
 
 ## Usage
 
-### With explicit coordinates
-
 ```yaml
-- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.2
+- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.5
   id: version
   with:
     group-id: 'io.github.mobilebytelabs'
@@ -16,23 +20,10 @@ Fetches the latest published version from Maven Central and bumps it. No version
 - run: echo "Next version: ${{ steps.version.outputs.version }}"
 ```
 
-### Auto-detect from build.gradle.kts
-
-```yaml
-- uses: actions/checkout@v6
-
-- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.2
-  id: version
-  with:
-    module-pattern: 'cmp-'
-```
-
-Scans `cmp-*/build.gradle.kts` for `coordinates("group", "artifact")` or `group = "..."` and queries Maven Central. When using `group = "..."` style, the module directory name is used as the artifact ID.
-
 ### Bump types
 
 ```yaml
-- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.2
+- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.5
   with:
     group-id: 'io.github.mobilebytelabs'
     artifact-id: 'cmp-clipboard'
@@ -41,30 +32,19 @@ Scans `cmp-*/build.gradle.kts` for `coordinates("group", "artifact")` or `group 
 
 ### First publish
 
-For first-ever publish (nothing on Maven Central yet), pass `version` directly on the reusable workflow instead of using this action:
-
-```yaml
-jobs:
-  publish:
-    uses: MobileByteLabs/mbl-actionhub/.github/workflows/publish-kmp-library.yml@v1.0.8
-    with:
-      version: '1.0.0'
-      module-pattern: 'cmp-'
-    secrets: inherit
-```
+Create a GitHub Release (e.g. `v3.2.0`) in your repo. The action reads it and bumps to `3.2.1`.
 
 ## Inputs
 
 | Input | Required | Default | Description |
 |-------|:--------:|---------|-------------|
-| `group-id` | No | `''` | Maven group ID. Auto-detected if empty. |
-| `artifact-id` | No | `''` | Maven artifact ID. Auto-detected if empty. |
-| `module-pattern` | No | `''` | Directory prefix for auto-detection (e.g. `cmp-`). |
-| `bump` | No | `patch` | Which part to bump: `patch`, `minor`, or `major`. |
+| `group-id` | **Yes** | — | Maven group ID |
+| `artifact-id` | **Yes** | — | Maven artifact ID |
+| `bump` | No | `patch` | Which part to bump: `patch`, `minor`, or `major` |
 
 ## Outputs
 
 | Output | Description |
 |--------|-------------|
 | `version` | Next version to publish (e.g. `3.2.2`) |
-| `current` | Latest version on Maven Central (e.g. `3.2.1`) |
+| `current` | Current latest version (e.g. `3.2.1`) |
