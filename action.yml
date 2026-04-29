@@ -88,8 +88,42 @@ runs:
         fi
 
         if [ -z "$LATEST" ]; then
-          echo "::error::No published version found on Maven Central for ${GROUP_ID}:${ARTIFACT_ID}. For first publish, pass 'version' input explicitly."
-          exit 1
+          echo "::notice::No published version on Maven Central — reading from build files"
+
+          # Auto-detect version from build.gradle.kts / gradle.properties
+          LOCAL_VERSION=""
+          SCAN_PATTERN="${PATTERN:-}"
+          [ -z "$SCAN_PATTERN" ] && SCAN_PATTERN="*"
+
+          for dir in ${SCAN_PATTERN}*/; do
+            [ ! -f "${dir}build.gradle.kts" ] && continue
+
+            # Try literal version = "x.y.z"
+            LOCAL_VERSION=$(grep -m1 'version\s*=\s*"[0-9]' "${dir}build.gradle.kts" 2>/dev/null | grep -o '"[0-9][^"]*"' | tr -d '"' || true)
+            if [ -n "$LOCAL_VERSION" ]; then break; fi
+
+            # Try coordinates("group", "artifact", "x.y.z")
+            LOCAL_VERSION=$(echo "$COORDS" | grep -o '"[^"]*"' | sed -n '3p' | tr -d '"' || true)
+            if [ -n "$LOCAL_VERSION" ] && echo "$LOCAL_VERSION" | grep -qE '^[0-9]+\.[0-9]+'; then break; fi
+            LOCAL_VERSION=""
+
+            # Try gradle property reference: version = providers.gradleProperty("key").get()
+            PROP_KEY=$(grep -m1 'version\s*=.*gradleProperty' "${dir}build.gradle.kts" 2>/dev/null | grep -o '"[^"]*"' | tr -d '"' || true)
+            if [ -n "$PROP_KEY" ] && [ -f "gradle.properties" ]; then
+              LOCAL_VERSION=$(grep "^${PROP_KEY}=" gradle.properties 2>/dev/null | cut -d= -f2 || true)
+              if [ -n "$LOCAL_VERSION" ]; then break; fi
+            fi
+          done
+
+          if [ -z "$LOCAL_VERSION" ]; then
+            echo "::error::No version found on Maven Central or in build files for ${GROUP_ID}:${ARTIFACT_ID}"
+            exit 1
+          fi
+
+          echo "current=" >> $GITHUB_OUTPUT
+          echo "version=${LOCAL_VERSION}" >> $GITHUB_OUTPUT
+          echo "Resolved: ${GROUP_ID}:${ARTIFACT_ID} first publish → ${LOCAL_VERSION} (from build files)"
+          exit 0
         fi
 
         # Parse version parts
