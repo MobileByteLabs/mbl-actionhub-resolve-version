@@ -84,7 +84,7 @@ runs:
 
         LATEST=""
         if [ -n "$RESPONSE" ]; then
-          LATEST=$(echo "$RESPONSE" | grep -o '"latestVersion":"[^"]*"' | cut -d'"' -f4)
+          LATEST=$(echo "$RESPONSE" | grep -o '"latestVersion":"[^"]*"' | cut -d'"' -f4 || true)
         fi
 
         if [ -z "$LATEST" ]; then
