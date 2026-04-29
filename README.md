@@ -7,7 +7,7 @@ Fetches the latest published version from Maven Central and bumps it. No version
 ### With explicit coordinates
 
 ```yaml
-- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.0
+- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.2
   id: version
   with:
     group-id: 'io.github.mobilebytelabs'
@@ -21,7 +21,7 @@ Fetches the latest published version from Maven Central and bumps it. No version
 ```yaml
 - uses: actions/checkout@v6
 
-- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.0
+- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.2
   id: version
   with:
     module-pattern: 'cmp-'
@@ -32,11 +32,25 @@ Scans `cmp-*/build.gradle.kts` for `coordinates("group", "artifact")` or `group 
 ### Bump types
 
 ```yaml
-- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.0
+- uses: MobileByteLabs/mbl-actionhub-resolve-version@v1.0.2
   with:
     group-id: 'io.github.mobilebytelabs'
     artifact-id: 'cmp-clipboard'
     bump: 'minor'   # patch (default), minor, or major
+```
+
+### First publish
+
+For first-ever publish (nothing on Maven Central yet), pass `version` directly on the reusable workflow instead of using this action:
+
+```yaml
+jobs:
+  publish:
+    uses: MobileByteLabs/mbl-actionhub/.github/workflows/publish-kmp-library.yml@v1.0.8
+    with:
+      version: '1.0.0'
+      module-pattern: 'cmp-'
+    secrets: inherit
 ```
 
 ## Inputs

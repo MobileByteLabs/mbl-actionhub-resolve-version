@@ -22,10 +22,6 @@ inputs:
     description: 'Which part to bump: patch (default), minor, or major'
     required: false
     default: 'patch'
-  fallback-version:
-    description: 'Version to use when nothing is published on Maven Central yet (first publish). If empty, defaults to 0.0.1.'
-    required: false
-    default: ''
 
 outputs:
   version:
@@ -46,7 +42,6 @@ runs:
         ARTIFACT_ID="${{ inputs.artifact-id }}"
         PATTERN="${{ inputs.module-pattern }}"
         BUMP="${{ inputs.bump }}"
-        FALLBACK="${{ inputs.fallback-version }}"
 
         # Auto-detect from build.gradle.kts if not provided
         if [ -z "$GROUP_ID" ] || [ -z "$ARTIFACT_ID" ]; then
@@ -67,7 +62,7 @@ runs:
               break
             fi
 
-            # Fallback: group = "..." (standard Gradle style)
+            # Fallback: group = "..." (standard Gradle style, artifact = module dir name)
             GROUP_LINE=$(grep -m1 '^group\s*=' "${dir}build.gradle.kts" || true)
             if [ -n "$GROUP_LINE" ]; then
               [ -z "$GROUP_ID" ] && GROUP_ID=$(echo "$GROUP_LINE" | grep -o '"[^"]*"' | tr -d '"')
@@ -93,15 +88,8 @@ runs:
         fi
 
         if [ -z "$LATEST" ]; then
-          if [ -n "$FALLBACK" ]; then
-            echo "::notice::No published version found on Maven Central — using fallback version ${FALLBACK}"
-            echo "current=" >> $GITHUB_OUTPUT
-            echo "version=${FALLBACK}" >> $GITHUB_OUTPUT
-            echo "Resolved: ${GROUP_ID}:${ARTIFACT_ID} not published yet → using fallback ${FALLBACK}"
-            exit 0
-          fi
-          echo "::warning::No published version found on Maven Central — using 0.0.0 as base"
-          LATEST="0.0.0"
+          echo "::error::No published version found on Maven Central for ${GROUP_ID}:${ARTIFACT_ID}. For first publish, pass 'version' input explicitly."
+          exit 1
         fi
 
         # Parse version parts
