@@ -1,0 +1,99 @@
+name: 'Resolve Next Version'
+description: 'Fetches the latest published version from Maven Central and bumps the patch number'
+author: 'MobileByteLabs'
+branding:
+  icon: 'tag'
+  color: 'green'
+
+inputs:
+  group-id:
+    description: 'Maven group ID (e.g. io.github.mobilebytelabs). Auto-detected from build.gradle.kts if empty.'
+    required: false
+    default: ''
+  artifact-id:
+    description: 'Maven artifact ID to query (e.g. cmp-clipboard). Auto-detected from first module if empty.'
+    required: false
+    default: ''
+  module-pattern:
+    description: 'Module directory prefix for auto-detection (e.g. cmp-). Only used when group-id/artifact-id are empty.'
+    required: false
+    default: ''
+  bump:
+    description: 'Which part to bump: patch (default), minor, or major'
+    required: false
+    default: 'patch'
+
+outputs:
+  version:
+    description: 'The next version to publish'
+    value: ${{ steps.resolve.outputs.version }}
+  current:
+    description: 'The latest version currently on Maven Central'
+    value: ${{ steps.resolve.outputs.current }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve next version
+      id: resolve
+      shell: bash
+      run: |
+        GROUP_ID="${{ inputs.group-id }}"
+        ARTIFACT_ID="${{ inputs.artifact-id }}"
+        PATTERN="${{ inputs.module-pattern }}"
+        BUMP="${{ inputs.bump }}"
+
+        # Auto-detect from build.gradle.kts if not provided
+        if [ -z "$GROUP_ID" ] || [ -z "$ARTIFACT_ID" ]; then
+          if [ -z "$PATTERN" ]; then
+            echo "::error::Provide group-id + artifact-id, or module-pattern for auto-detection"
+            exit 1
+          fi
+
+          for dir in ${PATTERN}*/; do
+            [ ! -d "$dir" ] && continue
+            [ ! -f "${dir}build.gradle.kts" ] && continue
+            COORDS=$(grep 'coordinates(' "${dir}build.gradle.kts" || true)
+            if [ -n "$COORDS" ]; then
+              [ -z "$GROUP_ID" ] && GROUP_ID=$(echo "$COORDS" | grep -o '"[^"]*"' | head -1 | tr -d '"')
+              [ -z "$ARTIFACT_ID" ] && ARTIFACT_ID=$(echo "$COORDS" | grep -o '"[^"]*"' | sed -n '2p' | tr -d '"')
+              break
+            fi
+          done
+
+          if [ -z "$GROUP_ID" ] || [ -z "$ARTIFACT_ID" ]; then
+            echo "::error::Could not auto-detect group/artifact from ${PATTERN}*/build.gradle.kts"
+            exit 1
+          fi
+        fi
+
+        echo "Querying Maven Central for ${GROUP_ID}:${ARTIFACT_ID}..."
+
+        # Query Maven Central Search API for latest version
+        RESPONSE=$(curl -sf "https://search.maven.org/solrsearch/select?q=g:${GROUP_ID}+AND+a:${ARTIFACT_ID}&rows=1&wt=json" || echo "")
+
+        LATEST=""
+        if [ -n "$RESPONSE" ]; then
+          LATEST=$(echo "$RESPONSE" | grep -o '"latestVersion":"[^"]*"' | cut -d'"' -f4)
+        fi
+
+        if [ -z "$LATEST" ]; then
+          echo "::warning::No published version found on Maven Central — using 0.0.0 as base"
+          LATEST="0.0.0"
+        fi
+
+        # Parse version parts
+        MAJOR=$(echo "$LATEST" | cut -d. -f1)
+        MINOR=$(echo "$LATEST" | cut -d. -f2)
+        PATCH=$(echo "$LATEST" | cut -d. -f3)
+
+        # Bump requested part
+        case "$BUMP" in
+          major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
+          minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
+          *)     NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+        esac
+
+        echo "current=${LATEST}" >> $GITHUB_OUTPUT
+        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+        echo "Resolved: ${GROUP_ID}:${ARTIFACT_ID} latest=${LATEST} → next=${NEW_VERSION} (${BUMP} bump)"
