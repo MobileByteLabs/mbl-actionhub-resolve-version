@@ -63,12 +63,30 @@ should_bump() {
 }
 
 query_maven() {
+  # Authoritative source: repo1.maven.org/maven2/.../maven-metadata.xml.
+  # Previously used search.maven.org/solrsearch, but Sonatype's Solr index
+  # does not reliably index every group (e.g. io.github.mobilebytelabs returns
+  # numFound:0), causing the sanity check to silently pass. The repo metadata
+  # XML is canonical and updated immediately on publish.
   if [ -n "${MAVEN_LATEST_OVERRIDE:-}" ]; then
     echo "$MAVEN_LATEST_OVERRIDE"
     return
   fi
-  curl -sf "https://search.maven.org/solrsearch/select?q=g:${GROUP_ID}+AND+a:${ARTIFACT_ID}&rows=1&wt=json" 2>/dev/null \
-    | jq -r '.response.docs[0].latestVersion // empty' 2>/dev/null || true
+  local xml
+  if [ -n "${MAVEN_METADATA_XML_OVERRIDE:-}" ]; then
+    xml="$MAVEN_METADATA_XML_OVERRIDE"
+  else
+    local group_path="${GROUP_ID//.//}"
+    local url="https://repo1.maven.org/maven2/${group_path}/${ARTIFACT_ID}/maven-metadata.xml"
+    xml=$(curl -sf "$url" 2>/dev/null) || true
+    [ -z "$xml" ] && return 0
+  fi
+  # Prefer <release>, fall back to <latest>. Both should match for non-snapshot
+  # publishes.
+  local v
+  v=$(echo "$xml" | sed -n 's|.*<release>\([^<]*\)</release>.*|\1|p' | head -1)
+  [ -z "$v" ] && v=$(echo "$xml" | sed -n 's|.*<latest>\([^<]*\)</latest>.*|\1|p' | head -1)
+  echo "$v"
 }
 
 query_github_releases() {
