@@ -220,6 +220,53 @@ echo "Test 9: invalid explicit version → fail"
   rm -f "$err_file"
 }
 
+# ─── Test 10: maven-metadata.xml parsed correctly ───────────────────────────
+echo "Test 10: parses <release> from maven-metadata.xml"
+{
+  unset MAVEN_LATEST_OVERRIDE MAVEN_METADATA_XML_OVERRIDE GH_RELEASES_JSON_OVERRIDE EXPLICIT_VERSION GP_KEY GP_PATH BUMP BUMP_WHEN VERIFY VERSION_SOURCE 2>/dev/null || true
+  export BUMP=patch BUMP_WHEN="github-releases,maven-central" VERIFY="false" VERSION_SOURCE="maven-central"
+  export EXPLICIT_VERSION="" GP_KEY=""
+  export MAVEN_METADATA_XML_OVERRIDE='<?xml version="1.0" encoding="UTF-8"?>
+<metadata>
+  <groupId>io.github.mobilebytelabs</groupId>
+  <artifactId>cmp-bubble</artifactId>
+  <versioning>
+    <latest>3.2.4</latest>
+    <release>3.2.4</release>
+    <versions>
+      <version>3.2.3</version>
+      <version>3.2.4</version>
+    </versions>
+  </versioning>
+</metadata>'
+  out=$(run_resolver)
+  assert_eq "metadata-xml/current" "current=3.2.4" "$(echo "$out" | grep '^current=')"
+  assert_eq "metadata-xml/version" "version=3.2.5" "$(echo "$out" | grep '^version=')"
+  assert_eq "metadata-xml/source"  "source=maven-central" "$(echo "$out" | grep '^source=')"
+}
+
+# ─── Test 11: regression — sanity check fires even when resolved == maven ────
+# Catches the May 2026 incident where search.maven.org silently returned empty
+# for io.github.mobilebytelabs and the sanity check passed, letting a duplicate
+# publish through. Now that we read maven-metadata.xml directly, this MUST fail.
+echo "Test 11: sanity check FAILS when resolved == maven_latest (regression)"
+{
+  unset MAVEN_LATEST_OVERRIDE MAVEN_METADATA_XML_OVERRIDE GH_RELEASES_JSON_OVERRIDE EXPLICIT_VERSION GP_KEY GP_PATH BUMP BUMP_WHEN VERIFY VERSION_SOURCE 2>/dev/null || true
+  export BUMP=patch BUMP_WHEN="github-releases,maven-central" VERIFY="true" VERSION_SOURCE="auto"
+  export EXPLICIT_VERSION="3.2.3" GP_KEY=""
+  export MAVEN_METADATA_XML_OVERRIDE='<?xml version="1.0"?><metadata><versioning><release>3.2.3</release><latest>3.2.3</latest></versioning></metadata>'
+  out_file=$(mktemp); log_file=$(mktemp)
+  GITHUB_OUTPUT="$out_file" bash "$RESOLVE" >"$log_file" 2>&1 && rc=$? || rc=$?
+  assert_eq "sanity-eq-fail/rc" "1" "$rc"
+  if grep -q "Sanity check failed" "$log_file"; then
+    echo "  ✓ sanity-eq-fail/message"; bump_pass
+  else
+    echo "  ✗ sanity-eq-fail/message: missing 'Sanity check failed' (got: $(cat "$log_file"))"
+    bump_fail "sanity-eq-fail/message"
+  fi
+  rm -f "$out_file" "$log_file"
+}
+
 # ─── summary ─────────────────────────────────────────────────────────────────
 echo ""
 echo "──────────────────────────────────────────────"
