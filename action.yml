@@ -1,5 +1,5 @@
 name: 'Resolve Next Version'
-description: 'Resolves the next publish version from Maven Central or GitHub Releases'
+description: 'Resolves next publish version from explicit input, gradle.properties, GitHub Releases, or Maven Central — with Maven sanity check'
 author: 'MobileByteLabs'
 branding:
   icon: 'tag'
@@ -10,20 +10,51 @@ inputs:
     description: 'Maven group ID (e.g. io.github.mobilebytelabs)'
     required: true
   artifact-id:
-    description: 'Maven artifact ID (e.g. cmp-clipboard)'
+    description: 'Maven artifact ID — used for verify-against-maven and as the maven-central source'
     required: true
   bump:
     description: 'Which part to bump: patch (default), minor, or major'
     required: false
     default: 'patch'
+  version:
+    description: 'Explicit version override. If non-empty, used as-is (no bump). Highest priority.'
+    required: false
+    default: ''
+  version-source:
+    description: 'Resolution mode: auto (default; runs full priority chain), gradle-properties, github-releases, maven-central'
+    required: false
+    default: 'auto'
+  gradle-properties-path:
+    description: 'Path to gradle.properties file (relative to repo root)'
+    required: false
+    default: 'gradle.properties'
+  gradle-properties-key:
+    description: 'Key in gradle.properties holding the version (e.g. kmptoolkit.version). Empty disables this source.'
+    required: false
+    default: ''
+  bump-when:
+    description: 'Comma-separated sources whose value should be patch-bumped. Defaults bump registry sources only; explicit/gradle-properties used as-is.'
+    required: false
+    default: 'github-releases,maven-central'
+  verify-against-maven:
+    description: 'Sanity check: fail if resolved version is not strictly greater than latest on Maven Central'
+    required: false
+    default: 'true'
+  tag-pattern:
+    description: 'POSIX ERE for valid GitHub Release tags. Default matches vX.Y.Z and X.Y.Z.'
+    required: false
+    default: '^v?[0-9]+\.[0-9]+\.[0-9]+$'
 
 outputs:
   version:
     description: 'The next version to publish'
     value: ${{ steps.resolve.outputs.version }}
   current:
-    description: 'The current latest version'
+    description: 'Resolved current version (before bump, if any)'
     value: ${{ steps.resolve.outputs.current }}
+  source:
+    description: 'Source used (explicit | gradle-properties | github-releases | maven-central)'
+    value: ${{ steps.resolve.outputs.source }}
 
 runs:
   using: 'composite'
@@ -31,56 +62,18 @@ runs:
     - name: Resolve next version
       id: resolve
       shell: bash
-      run: |
-        GROUP_ID="${{ inputs.group-id }}"
-        ARTIFACT_ID="${{ inputs.artifact-id }}"
-        BUMP="${{ inputs.bump }}"
-
-        # 1. Try Maven Central
-        echo "Querying Maven Central for ${GROUP_ID}:${ARTIFACT_ID}..."
-        RESPONSE=$(curl -sf "https://search.maven.org/solrsearch/select?q=g:${GROUP_ID}+AND+a:${ARTIFACT_ID}&rows=1&wt=json" || echo "")
-
-        LATEST=""
-        if [ -n "$RESPONSE" ]; then
-          LATEST=$(echo "$RESPONSE" | grep -o '"latestVersion":"[^"]*"' | cut -d'"' -f4 || true)
-        fi
-
-        # 2. Fallback: GitHub Releases (latest tag)
-        if [ -z "$LATEST" ]; then
-          echo "Not on Maven Central — checking GitHub Releases..."
-          REPO="${GITHUB_REPOSITORY}"
-          TAG=$(curl -sf "https://api.github.com/repos/${REPO}/releases/latest" \
-            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" 2>/dev/null \
-            | grep -o '"tag_name":\s*"[^"]*"' | grep -o '"[^"]*"$' | tr -d '"' || true)
-
-          # Strip leading 'v' if present
-          TAG="${TAG#v}"
-
-          if [ -n "$TAG" ] && echo "$TAG" | grep -qE '^[0-9]+\.[0-9]+'; then
-            LATEST="$TAG"
-            echo "Found GitHub Release: ${LATEST}"
-          fi
-        fi
-
-        if [ -z "$LATEST" ]; then
-          echo "::error::No version found on Maven Central or GitHub Releases for ${GROUP_ID}:${ARTIFACT_ID}. Create a GitHub Release first."
-          exit 1
-        fi
-
-        # Parse and bump
-        MAJOR=$(echo "$LATEST" | cut -d. -f1)
-        MINOR=$(echo "$LATEST" | cut -d. -f2)
-        PATCH=$(echo "$LATEST" | cut -d. -f3)
-
-        case "$BUMP" in
-          major) NEW_VERSION="$((MAJOR + 1)).0.0" ;;
-          minor) NEW_VERSION="${MAJOR}.$((MINOR + 1)).0" ;;
-          *)     NEW_VERSION="${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
-        esac
-
-        echo "current=${LATEST}" >> $GITHUB_OUTPUT
-        echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
-        echo "Resolved: ${GROUP_ID}:${ARTIFACT_ID} current=${LATEST} → next=${NEW_VERSION} (${BUMP} bump)"
       env:
+        GROUP_ID: ${{ inputs.group-id }}
+        ARTIFACT_ID: ${{ inputs.artifact-id }}
+        BUMP: ${{ inputs.bump }}
+        EXPLICIT_VERSION: ${{ inputs.version }}
+        VERSION_SOURCE: ${{ inputs.version-source }}
+        GP_PATH: ${{ inputs.gradle-properties-path }}
+        GP_KEY: ${{ inputs.gradle-properties-key }}
+        BUMP_WHEN: ${{ inputs.bump-when }}
+        VERIFY: ${{ inputs.verify-against-maven }}
+        TAG_PATTERN: ${{ inputs.tag-pattern }}
         GITHUB_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        bash "${GITHUB_ACTION_PATH}/resolve.sh"
