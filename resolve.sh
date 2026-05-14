@@ -30,10 +30,21 @@ fi
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
-is_semver() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+# Accepts SemVer 2.0.0 (X.Y.Z, optionally followed by -pre.release identifiers
+# and/or +build.metadata). Examples accepted: 1.2.3, 2.0.0-alpha.1,
+# 2.0.0-rc.2+build.1234, 1.0.0-beta. Rejected: v1.2.3, 1.2, 1.2.3.4.
+is_semver() { [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; }
+
+# True if $1 has a SemVer pre-release tag (anything after `-`, before any `+`).
+has_prerelease() { [[ "$1" == *-* && "${1%%-*}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; }
+
+# Strip pre-release + build metadata: 2.0.0-alpha.1+build.5 -> 2.0.0
+strip_prerelease() { echo "${1%%[-+]*}"; }
 
 bump_version() {
-  local v="$1" kind="$2"
+  local v
+  v="$(strip_prerelease "$1")"
+  local kind="$2"
   local major minor patch
   IFS=. read -r major minor patch <<<"$v"
   case "$kind" in
@@ -43,17 +54,34 @@ bump_version() {
   esac
 }
 
-# Compare semvers: prints -1 / 0 / 1 for $1 vs $2
+# Compare semvers: prints -1 / 0 / 1 for $1 vs $2.
+# Honors SemVer 2.0.0 rule that a pre-release version has LOWER precedence than
+# the corresponding normal version. Pre-release identifiers themselves are
+# compared lexicographically — sufficient for the resolver's purposes (the action
+# never needs to differentiate alpha.1 vs alpha.2 in a way that flips a publish
+# decision; the explicit-version path bypasses cmp_semver entirely).
 cmp_semver() {
-  local a="$1" b="$2"
+  local a_base b_base
+  a_base="$(strip_prerelease "$1")"
+  b_base="$(strip_prerelease "$2")"
   local a1 a2 a3 b1 b2 b3
-  IFS=. read -r a1 a2 a3 <<<"$a"
-  IFS=. read -r b1 b2 b3 <<<"$b"
+  IFS=. read -r a1 a2 a3 <<<"$a_base"
+  IFS=. read -r b1 b2 b3 <<<"$b_base"
   for pair in "$a1 $b1" "$a2 $b2" "$a3 $b3"; do
     read -r av bv <<<"$pair"
     if (( av < bv )); then echo -1; return; fi
     if (( av > bv )); then echo  1; return; fi
   done
+  # Bases equal — apply pre-release rule. 1.0.0-alpha < 1.0.0.
+  local a_pre b_pre
+  if has_prerelease "$1"; then a_pre="${1#*-}"; a_pre="${a_pre%%+*}"; else a_pre=""; fi
+  if has_prerelease "$2"; then b_pre="${2#*-}"; b_pre="${b_pre%%+*}"; else b_pre=""; fi
+  if [ -z "$a_pre" ] && [ -z "$b_pre" ]; then echo 0; return; fi
+  if [ -z "$a_pre" ] && [ -n "$b_pre" ]; then echo  1; return; fi
+  if [ -n "$a_pre" ] && [ -z "$b_pre" ]; then echo -1; return; fi
+  # Both have pre-release — compare lexicographically.
+  if [[ "$a_pre" < "$b_pre" ]]; then echo -1; return; fi
+  if [[ "$a_pre" > "$b_pre" ]]; then echo  1; return; fi
   echo 0
 }
 
